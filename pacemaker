@@ -70,6 +70,7 @@ class BaseParser(object):
     id = None
     partial_compare = False
     module = None
+    no_delete = False
 
     def __init__(self, args, module=None):
         self.cib = self.parse(args)
@@ -90,7 +91,7 @@ class BaseParser(object):
             if value != obj.cib.get(key):
                 return False
             obj_key.remove(key)
-        if len(obj_key) and not self.partial:
+        if len(obj_key) and not self.partial_compare:
             return False
         return True
 
@@ -305,6 +306,7 @@ class OrderParser(BaseParser):
 
 class PropertyParser(BaseParser):
     partial_compare = True
+    no_delete = True
 
     def parse(self, args):
         ret = dict(
@@ -336,10 +338,12 @@ class PropertyParser(BaseParser):
 
 class RscDefaultsParser(PropertyParser):
     partial_compare = True
+    no_delete = True
 
 
 class FencingTopologyParser(BaseParser):
     partial_compare = True
+    no_delete = True
 
     def parse(self, args):
         ret = dict(
@@ -427,13 +431,18 @@ def main():
     module = PacemakerModule(argument_spec=dict())
 
     state = module.params['state']
+    need_commit = module.params['commit']
     args = splitter(module.params['args'])
     changed = False
 
-    #import pprint
-    #module.fail_json(rc=256, msg=pprint.pformat(args))
     if len(args) == 0:
         module.fail_json(rc=256, msg="no command given")
+
+    if args[0] == "commit":
+        rc, out, err = module.run_command(["crm", "configure", "commit"])
+        if rc:
+            module.fail_json(rc=256, msg="crm command failed")
+        module.exit_json(args=args, changed=True)
 
     parser = CIBParser(module)
     new = parser.parse_cib(args)
@@ -464,20 +473,20 @@ def main():
     else:
         if is_same:
             module.exit_json(args=args, changed=False)
-        elif is_same is False:
+        elif is_same is False and not new.no_delete:
             need_delete = True
         need_append = True
 
     crm_config_commands = []
     if need_delete:
-        crm_config_commands.append(["delete", new.id])
+        crm_config_commands.append(["resource", "stop", new.id])
+        crm_config_commands.append(["configure", "delete", new.id])
     if need_append:
-        crm_config_commands.append(args)
-    crm_config_commands.append(["commit"])
-    for _args in crm_config_commands:
-        #module.fail_json(rc=256, msg=' '.join(["crm", "configure"] + _args))
-        rc, out, err = module.run_command(["crm", "-F", "configure"] + _args)
-        #module.fail_json(rc=256, msg="DEBUG")
+        crm_config_commands.append(["configure"] + args)
+    if need_commit:
+        crm_config_commands.append(["configure", "commit"])
+    for command in crm_config_commands:
+        rc, out, err = module.run_command(["crm", "-F"] + command)
         if rc:
             module.fail_json(rc=256, msg="crm command failed")
 
@@ -504,12 +513,21 @@ class PacemakerModule(AnsibleModule):
         params = {}
 
         params["state"] = "present"
+        params["commit"] = True
         r = re.compile(r'(^|\s)(state)=(?P<quote>[\'"])?(.*?)(?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)')
         for m in r.finditer(args):
             v = m.group(4).replace("\\", "")
-            if v not in ["present", "absent"]:
-                self.fail_json(rc=256, msg="state= is either present or absent")
-            params['state'] = v
+            if m.group(2) == "state":
+                if v not in ["present", "absent"]:
+                    self.fail_json(
+                            rc=256, msg="state= is either present or absent")
+                params['state'] = v
+            if m.group(2) == "commit":
+                if v not in ["yes", "no"]:
+                    self.fail_json(
+                            rc=256, msg="commit= is either yes or no")
+                if v == 'yes':
+                    params['commit'] = True
         args = r.sub("", args)
 
         params["args"] = args.strip()
