@@ -366,6 +366,16 @@ class FencingTopologyParser(BaseParser):
         return ret
 
 
+def splitter(args):
+    ret = []
+    for a, b, c, d in REX.findall(args):
+        if len(b) == 0:
+            ret.append(a)
+        else:
+            ret.append(a+b)
+    return ret
+
+
 class CIBParser(object):
 
     cib_parser_class = {
@@ -408,16 +418,6 @@ class CIBParser(object):
                     cibs.append(cib)
                 new_line = ""
         return cibs
-
-
-def splitter(args):
-    ret = []
-    for a, b, c, d in REX.findall(args):
-        if len(b) == 0:
-            ret.append(a)
-        else:
-            ret.append(a+b)
-    return ret
 
 
 def main():
