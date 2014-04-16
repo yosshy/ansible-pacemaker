@@ -130,8 +130,12 @@ class PrimitiveParser(BaseParser):
             if mode not in ret:
                 ret[mode] = {}
             if (mode == "op"):
-                ret[mode][os_type][key] = value
+                if op_type not in ret[mode]:
+                    ret[mode][op_type] = {}
+                ret[mode][op_type][key] = value
             else:
+                if mode not in ret:
+                    ret[mode] = {}
                 ret[mode][key] = value
 
         return ret
@@ -178,6 +182,8 @@ class GroupParser(BaseParser):
                 self.module.fail_json(
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
+            if mode not in ret:
+                ret[mode] = {}
             ret[mode][key] = value
 
         return ret
@@ -211,6 +217,8 @@ class CloneParser(BaseParser):
                 self.module.fail_json(
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
+            if mode not in ret:
+                ret[mode] = {}
             ret[mode][key] = value
     
         return ret
