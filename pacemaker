@@ -73,12 +73,12 @@ class BaseParser(object):
     no_delete = False
 
     def __init__(self, args, module=None):
+        if module:
+            self.module = module
         self.cib = self.parse(args)
         self.command = self.cib["command"]
         if self.id_name:
             self.id = self.cib[self.id_name]
-        if module:
-            self.module = module
 
     def parse(self, args):
         raise NotImplementedError()
@@ -322,6 +322,9 @@ class PropertyParser(BaseParser):
             )
         if args[0].startswith("$id"):
             args.pop(0)
+
+        if args[0].startswith("cib-bootstrap-options:"):
+            args.pop(0)
     
         while (args):
             arg = args.pop(0)
@@ -497,6 +500,8 @@ def main():
         rc, out, err = module.run_command(["crm", "-F"] + command)
         if rc:
             module.fail_json(rc=256, msg="crm command failed")
+            #FIXME: Re-enable error messages.
+            #module.fail_json(rc=256, msg="crm command failed \n%s"%err)
 
     module.exit_json(args=args, changed=True)
 
