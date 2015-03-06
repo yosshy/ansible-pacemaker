@@ -18,12 +18,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+import copy
 import sys
-import datetime
-import traceback
 import re
-import shlex
-import os
 
 DOCUMENTATION = '''
 ---
@@ -53,11 +50,24 @@ author: Michael DeHaan
 
 EXAMPLES = '''
 # Example from Ansible Playbooks
-- command: /sbin/shutdown -t now
-
-# Run the command if the specified file does not exist
-- command: /usr/bin/make_database.sh arg1 arg2
+- pacemaker: primitive vip_neutron ocf:heartbeat:IPaddr2 params ip="1.2.3.4" cidr_netmask="32" nic="eth0"
+      op monitor timeout=120 interval=60
+      op start timeout=60 interval=0
+      op stop timeout=60 interval=0
+      meta resource-stickiness=1 is-managed=true target-role=Started
 '''
+
+# Dict of options and their defaults
+OPTIONS = {
+    'state': 'present',
+    'shadow': None,
+}
+
+OPTIONS_REGEX = '|'.join(OPTIONS.keys())
+PARAM_REGEX = re.compile(
+r'(^|\s)(' + OPTIONS_REGEX +
+r')=(?P<quote>[\'"])?(.*?)(?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)'
+)
 
 
 REX = re.compile(
@@ -114,11 +124,13 @@ class PrimitiveParser(BaseParser):
                 if (arg == "op"):
                     op_type = args.pop(0)
                 continue
-    
+
             if '=' not in arg:
                 raise Exception("no key=value option: %s" % arg)
 
             key, value = arg.split("=")
+            value = unquote(value)
+
             if key == "":
                 self.module.fail_json(
                     rc=258, msg="no key in key=value option")
@@ -204,11 +216,13 @@ class CloneParser(BaseParser):
             if (arg in ["params", "meta"]):
                 mode = arg
                 continue
-    
+
             if mode is None:
                 self.module.fail_json(rc=258, msg="no params or meta")
-    
+
             key, value = arg.split("=")
+            value = unquote(value)
+
             if key == "":
                 self.module.fail_json(
                     rc=258,
@@ -217,10 +231,11 @@ class CloneParser(BaseParser):
                 self.module.fail_json(
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
+
             if mode not in ret:
                 ret[mode] = {}
             ret[mode][key] = value
-    
+
         return ret
 
 
@@ -242,8 +257,9 @@ class LocationParser(BaseParser):
             rsc=args.pop(0),
             )
         arg = args.pop(0)
+
         if arg != "rules":
-            ret["score"] = args.pop(0)
+            ret["score"] = arg
             ret["node"] = args.pop(0)
             return ret
         else:
@@ -325,7 +341,7 @@ class PropertyParser(BaseParser):
 
         if args[0].startswith("cib-bootstrap-options:"):
             args.pop(0)
-    
+
         while (args):
             arg = args.pop(0)
             if '=' not in arg:
@@ -333,7 +349,7 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no key-value :%s" % arg)
             key, value = arg.split("=")
-    
+
             if key == "":
                 self.module.fail_json(
                     rc=258,
@@ -343,7 +359,7 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
             ret[key] = value
-    
+
         return ret
 
 
@@ -377,17 +393,16 @@ class FencingTopologyParser(BaseParser):
                 newfence.append(arg)
         if newnode:
             ret[newnode] = newfence
-    
+
         return ret
 
 
 def splitter(args):
     ret = []
     for a, b, c, d in REX.findall(args):
-        if len(b) == 0:
-            ret.append(a)
-        else:
-            ret.append(a+b)
+        arg = a if len(b) == 0 else a + b
+        arg = unquote(arg)
+        ret.append(arg)
     return ret
 
 
@@ -434,7 +449,6 @@ class CIBParser(object):
                 new_line = ""
         return cibs
 
-
 def main():
 
     # the command module is the one ansible module that does not take key=value args
@@ -442,7 +456,7 @@ def main():
     module = PacemakerModule(argument_spec=dict())
 
     state = module.params['state']
-    need_commit = module.params['commit']
+    shadow = module.params['shadow']
     args = splitter(module.params['args'])
     changed = False
 
@@ -450,15 +464,23 @@ def main():
         module.fail_json(rc=256, msg="no command given")
 
     if args[0] == "commit":
-        rc, out, err = module.run_command(["crm", "configure", "commit"])
+        if not shadow:
+            self.fail_json(rc=256, msg="shadow= is required for commit")
+
+        rc, out, err = module.run_command(["crm", "cib", "commit", shadow])
         if rc:
             module.fail_json(rc=256, msg="crm command failed")
+
         module.exit_json(args=args, changed=True)
 
     parser = CIBParser(module)
     new = parser.parse_cib(args)
 
-    crm_args = ["crm", "configure", "show"]
+    if shadow:
+        crm_args = ["crm", "-c", shadow, "configure", "show"]
+    else:
+        crm_args = ["crm", "configure", "show"]
+
     rc, out, err = module.run_command(crm_args)
     if rc:
         module.fail_json(rc=256, msg="crm command failed")
@@ -494,20 +516,22 @@ def main():
         crm_config_commands.append(["configure", "delete", new.id])
     if need_append:
         crm_config_commands.append(["configure"] + args)
-    if need_commit:
-        crm_config_commands.append(["configure", "commit"])
+
+    cmd_prefix = ["crm", "-F"]
+    if shadow:
+        cmd_prefix.extend(["-c", shadow])
+
     for command in crm_config_commands:
-        rc, out, err = module.run_command(["crm", "-F"] + command)
+        rc, out, err = module.run_command(cmd_prefix + command)
         if rc:
             module.fail_json(rc=256, msg="crm command failed")
-            #FIXME: Re-enable error messages.
-            #module.fail_json(rc=256, msg="crm command failed \n%s"%err)
 
     module.exit_json(args=args, changed=True)
 
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.splitter import *
 
 # only the command module should ever need to do this
 # everything else should be simple key=value
@@ -523,27 +547,25 @@ class PacemakerModule(AnsibleModule):
     def _load_params(self):
         ''' read the input and return a dictionary and the arguments string '''
         args = MODULE_ARGS
-        params = {}
+        params = copy.copy(OPTIONS)
 
-        params["state"] = "present"
-        params["commit"] = True
-        r = re.compile(r'(^|\s)(state)=(?P<quote>[\'"])?(.*?)(?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)')
-        for m in r.finditer(args):
-            v = m.group(4).replace("\\", "")
-            if m.group(2) == "state":
-                if v not in ["present", "absent"]:
-                    self.fail_json(
-                            rc=256, msg="state= is either present or absent")
-                params['state'] = v
-            if m.group(2) == "commit":
-                if v not in ["yes", "no"]:
-                    self.fail_json(
-                            rc=256, msg="commit= is either yes or no")
-                if v == 'yes':
-                    params['commit'] = True
-        args = r.sub("", args)
+        items = split_args(args)
 
-        params["args"] = args.strip()
-        return (params, params["args"])
+        for x in items:
+            quoted = x.startswith('"') and x.endswith('"') or x.startswith("'") and x.endswith("'")
+            if '=' in x and not quoted:
+                # check to see if this is a special parameter for the command
+                k, v = x.split('=', 1)
+                v = unquote(v)
+                if k in OPTIONS.keys():
+                    if k == "state":
+                        if v not in ["present", "absent"]:
+                            self.fail_json(rc=256, msg="state= is either present or absent")
+                    params[k] = v
+        # Remove any of the above k=v params from the args string
+        args = PARAM_REGEX.sub('', args)
+        params['args'] = args.strip()
+
+        return (params, params['args'])
 
 main()
