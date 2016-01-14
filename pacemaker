@@ -459,7 +459,7 @@ def main():
     if args[0] == "commit":
         rc, out, err = module.run_command(["crm", "configure", "commit"])
         if rc:
-            module.fail_json(rc=256, msg="crm command failed")
+            module.fail_json(rc=256, msg="crm command failed", out=out, err=err)
         module.exit_json(args=args, changed=True)
 
     parser = CIBParser(module)
@@ -468,14 +468,16 @@ def main():
     crm_args = ["crm", "configure", "show"]
     rc, out, err = module.run_command(crm_args)
     if rc:
-        module.fail_json(rc=256, msg="crm command failed")
+        module.fail_json(rc=256, msg="crm configure show failed", out=out, err=err)
 
     is_same = None
+    old_cib = None
     for cur in parser.parse_cibs(out.splitlines()):
         if new.command != cur.command:
             continue
         if new.id != cur.id:
             continue
+        old_cib = cur.cib
         is_same = new.is_same(cur)
         break
 
@@ -510,7 +512,7 @@ def main():
             #FIXME: Re-enable error messages.
             #module.fail_json(rc=256, msg="crm command failed \n%s"%err)
 
-    module.exit_json(args=args, changed=True)
+    module.exit_json(args=args, old=old_cib, new=new.cib, changed=True)
 
 
 # import module snippets
