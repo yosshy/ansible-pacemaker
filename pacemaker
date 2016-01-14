@@ -105,6 +105,10 @@ class PrimitiveParser(BaseParser):
             rsc=args.pop(0),
             type=args.pop(0),
             )
+
+        if ':' not in ret['type']:
+            ret['type'] = 'ocf:heartbeat:' + ret['type']
+
         mode = None
         while (len(args) > 0):
             arg = args.pop(0)
@@ -126,6 +130,9 @@ class PrimitiveParser(BaseParser):
                 self.module.fail_json(
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
+
+            if value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
 
             if mode not in ret:
                 ret[mode] = {}
