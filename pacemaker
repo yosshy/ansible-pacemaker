@@ -243,18 +243,13 @@ class LocationParser(BaseParser):
     id_name = "id"
 
     def parse(self, args):
+        argscopy = list(args)
         ret = dict(
             command=args.pop(0),
             id=args.pop(0),
             rsc=args.pop(0),
             )
-        arg = args.pop(0)
-        if arg != "rules":
-            ret["score"] = args.pop(0)
-            ret["node"] = args.pop(0)
-            return ret
-        else:
-            ret["rules"] = []
+        ret["rules"] = []
 
         newrule = None
         while (args):
@@ -271,22 +266,23 @@ class LocationParser(BaseParser):
                         self.module.fail_json(
                             rc=258,
                             msg="no value in key=value option (key=%s)" % key)
-                    newargs[key] = value
+                    newrule[key] = value
                     arg = args.pop(0)
                 if arg.endswith(":"):
-                    newargs["score"] = arg
+                    newrule["score"] = arg
                 else:
                     self.module.fail_json(
                         rc=258,
                         msg="no score in rule for location (id=%s)" % ret["id"])
 
             elif newrule is not None:
-                newrule["expression"].append(args)
+                newrule["expression"].append(arg)
 
             else:
                 self.module.fail_json(
                     rc=258,
-                    msg="no rule for location (id=%s)" % ret["id"])
+                    msg="no rule for location (id=%s)" % ret["id"],
+                    args=argscopy)
         if newrule:
             ret["rules"].append(newrule)
 
