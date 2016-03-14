@@ -12,34 +12,37 @@ use this, write a playbook like below:
   tasks:
     - name: disable stonith
       pacemaker: >
-         property no-quorum-policy="ignore" stonith-enabled="false"
-      notify:
-        - commit
+         resource='property no-quorum-policy="ignore" stonith-enabled="false"'
+         state=present
 
     - name: define floating IP
-      pacemaker: >
-         primitive test_vip ocf:heartbeat:IPaddr2
-         params ip="192.168.33.200" cidr_netmask="24" nic="port-ctl"
-         state=present
-      notify:
-        - commit
+      pacemaker: 
+         resource: >
+           primitive test_vip ocf:heartbeat:IPaddr2
+           params ip="192.168.33.200" cidr_netmask="24" nic="port-ctl"
+         state: present
 
-    - name: define floating IP with automatic commit
-      pacemaker: >
-         primitive test_vip2 ocf:heartbeat:IPaddr2
-         params ip="192.168.33.201" cidr_netmask="24" nic="port-ctl"
-         commit=yes
+    - name: change floating IP
+      pacemaker: 
+         resource: >
+           primitive test_vip ocf:heartbeat:IPaddr2
+           params ip="192.168.33.100" cidr_netmask="24" nic="port-ctl"
+         state: present
 
-  handlers:
-    - name: commit
-      pacemaker: commit
+    - name: remove floating IP
+      pacemaker: 
+         resource: >
+           primitive test_vip ocf:heartbeat:IPaddr2
+           params ip="192.168.33.100" cidr_netmask="24" nic="port-ctl"
+         state: absent
 ```
-
+"resource" contains the crm resource to configure. 
 'primitive ... nic="port-ctl"' is just like "crm configure primitive"
-subcommand but state=... is not. state=<present|absent> works just
-like other ansible modules (default=present). If there is the same
-configuration, a task with state=present will do nothing and one with
-state=absent will delete the configuration.
+subcommand. As such after every call of the pacemaker module there is an implicit commit.
+
+state=<present|absent> works just like other ansible modules (default=present).
+If there is the same configuration, a task with state=present will do nothing
+and one with state=absent will delete the configuration.
 
 |current                           |state=present            |state=absent |
 |----------------------------------|-------------------------|-------------|
@@ -61,4 +64,3 @@ Currently, it supports crm configure sub commands below:
 - property (tested)
 - rsc_defaults
 - fencing_topology
-- commit
