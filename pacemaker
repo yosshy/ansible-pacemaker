@@ -170,7 +170,7 @@ class GroupParser(BaseParser):
                 continue
 
             if mode is None:
-                rsc.append(arg)
+                ret["rsc"].append(arg)
                 continue
 
             key, value = arg.split("=")
