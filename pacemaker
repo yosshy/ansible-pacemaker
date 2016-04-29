@@ -546,7 +546,7 @@ def main():
                 module.fail_json(rc=256, msg="crm -F -w %s failed" % ' '.join(command), out=out, err=err)
 
     if new.crmsh:
-        module.exit_json(args=args, old=xmltostring(old_cib) if old_cib else None, new=xmltostring(new.cib), debug=debug, changed=True)
+        module.exit_json(args=args, old=xmltostring(old_cib) if old_cib is not None else None, new=xmltostring(new.cib), debug=debug, changed=True)
     else:
         module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug, changed=True)
 
