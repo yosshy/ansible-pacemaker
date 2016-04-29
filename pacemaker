@@ -24,6 +24,9 @@ import traceback
 import re
 import shlex
 import os
+import crmsh.parse
+from lxml.etree import tostring as xmltostring
+from xmltodict import parse as parsexmltodict
 
 DOCUMENTATION = '''
 ---
@@ -65,20 +68,34 @@ REX = re.compile(
     re.DOTALL | re.VERBOSE)
 
 
+cmd_xmlres_map = {
+    "location": "rsc_location",
+}
+
 class BaseParser(object):
     id_name = None
     id = None
     partial_compare = False
     module = None
     no_delete = False
+    crmsh = False
 
     def __init__(self, args, module=None):
         if module:
             self.module = module
-        self.cib = self.parse(args)
-        self.command = self.cib["command"]
-        if self.id_name:
-            self.id = self.cib[self.id_name]
+        if self.crmsh:
+            clip = crmsh.parse.CliParser()
+            self.cib = parsexmltodict(xmltostring(clip.parse(' '.join(args))))
+            self.command = args[0]
+            if self.command in cmd_xmlres_map:
+                self.id = self.cib[cmd_xmlres_map[self.command]]['@id']
+            else:
+                self.id = self.cib[self.command]['@id']
+        else:
+            self.cib = self.parse(args)
+            self.command = self.cib["command"]
+            if self.id_name:
+                self.id = self.cib[self.id_name]
 
     def parse(self, args):
         raise NotImplementedError()
@@ -241,6 +258,7 @@ class RscTemplateParser(PrimitiveParser):
 
 class LocationParser(BaseParser):
     id_name = "id"
+    crmsh = True
 
     def parse(self, args):
         argscopy = list(args)
