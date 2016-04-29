@@ -82,6 +82,7 @@ class BaseParser(object):
     module = None
     no_delete = False
     crmsh = False
+    resource = True
 
     def __init__(self, args, module=None):
         if module:
@@ -264,6 +265,7 @@ class RscTemplateParser(PrimitiveParser):
 class LocationParser(BaseParser):
     id_name = "id"
     crmsh = True
+    resource = False
 
     def parse(self, args):
         argscopy = list(args)
@@ -529,7 +531,8 @@ def main():
     crm_config_commands = []
     if need_delete:
         debug.append("deleting %s" % new.id)
-        crm_config_commands.append(["resource", "stop", new.id])
+        if new.resource:
+            crm_config_commands.append(["resource", "stop", new.id])
         crm_config_commands.append(["configure", "delete", new.id])
     if need_append:
         crm_config_commands.append(["configure"] + args)
