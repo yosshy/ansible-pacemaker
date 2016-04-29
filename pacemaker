@@ -72,6 +72,8 @@ cmd_xmlres_map = {
     "location": "rsc_location",
 }
 
+debug = []
+
 class BaseParser(object):
     id_name = None
     id = None
@@ -84,6 +86,7 @@ class BaseParser(object):
         if module:
             self.module = module
         if self.crmsh:
+            debug.append("crmsh prim: %s" % args[0])
             clip = crmsh.parse.CliParser()
             self.cib = parsexmltodict(xmltostring(clip.parse(' '.join(args))))
             self.command = args[0]
@@ -91,6 +94,7 @@ class BaseParser(object):
                 self.id = self.cib[cmd_xmlres_map[self.command]]['@id']
             else:
                 self.id = self.cib[self.command]['@id']
+            debug.append("id: %s" % self.id)
         else:
             self.cib = self.parse(args)
             self.command = self.cib["command"]
@@ -440,6 +444,7 @@ class CIBParser(object):
 
     def parse_cibs(self, lines):
         cibs = []
+        #debug.append("all lines: %s" % lines)
         new_line = ""
         for line in lines:
             new_line += line.strip()
@@ -449,6 +454,7 @@ class CIBParser(object):
                 if len(new_line) == 0:
                     continue
                 args = splitter(new_line)
+                #debug.append("new cib to parse: %s" % args[0])
                 cib = self.parse_cib(args)
                 if cib:
                     cibs.append(cib)
@@ -486,12 +492,15 @@ def main():
 
     crm_args = ["crm", "configure", "show"]
     rc, out, err = module.run_command(crm_args)
+
     if rc:
         module.fail_json(rc=256, msg="crm configure show failed", out=out, err=err)
 
     is_same = None
     old_cib = None
     for cur in parser.parse_cibs(out.splitlines()):
+        #debug.append("old command: %s, id: %s" % (cur.command, cur.id))
+
         if new.command != cur.command:
             continue
         if new.id != cur.id:
@@ -511,13 +520,14 @@ def main():
             need_delete = True
     else:
         if is_same:
-            module.exit_json(args=args, changed=False)
+            module.exit_json(args=args, debug=debug, changed=False)
         elif is_same is False and not new.no_delete:
             need_delete = True
         need_append = True
 
     crm_config_commands = []
     if need_delete:
+        debug.append("deleting %s" % new.id)
         crm_config_commands.append(["resource", "stop", new.id])
         crm_config_commands.append(["configure", "delete", new.id])
     if need_append:
@@ -526,11 +536,12 @@ def main():
         crm_config_commands.append(["configure", "commit"])
     if not module.check_mode:
         for command in crm_config_commands:
+            #debug.append("running crm -F -w %s" % command)
             rc, out, err = module.run_command(["crm", "-F", "-w"] + command)
             if rc:
                 module.fail_json(rc=256, msg="crm -F -w %s failed" % ' '.join(command), out=out, err=err)
 
-    module.exit_json(args=args, old=old_cib, new=new.cib, changed=True)
+    module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug, changed=True)
 
 
 # import module snippets
