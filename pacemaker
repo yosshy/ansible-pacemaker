@@ -25,8 +25,9 @@ import re
 import shlex
 import os
 import crmsh.parse
+from crmsh.xmlutil import xml_equals
 from lxml.etree import tostring as xmltostring
-from xmltodict import parse as parsexmltodict
+#from xmltodict import parse as parsexmltodict
 
 DOCUMENTATION = '''
 ---
@@ -88,12 +89,9 @@ class BaseParser(object):
         if self.crmsh:
             debug.append("crmsh prim: %s" % args[0])
             clip = crmsh.parse.CliParser()
-            self.cib = parsexmltodict(xmltostring(clip.parse(' '.join(args))))
+            self.cib = clip.parse(' '.join(args))
             self.command = args[0]
-            if self.command in cmd_xmlres_map:
-                self.id = self.cib[cmd_xmlres_map[self.command]]['@id']
-            else:
-                self.id = self.cib[self.command]['@id']
+            self.id = self.cib.get('id')
             debug.append("id: %s" % self.id)
         else:
             self.cib = self.parse(args)
@@ -105,6 +103,9 @@ class BaseParser(object):
         raise NotImplementedError()
 
     def is_same(self, obj):
+        if self.crmsh:
+            return xml_equals(self.cib, obj.cib)
+
         obj_key = obj.cib.keys()
         for key, value in self.cib.iteritems():
             if key not in obj_key:
@@ -541,7 +542,10 @@ def main():
             if rc:
                 module.fail_json(rc=256, msg="crm -F -w %s failed" % ' '.join(command), out=out, err=err)
 
-    module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug, changed=True)
+    if new.crmsh:
+        module.exit_json(args=args, old=xmltostring(old_cib) if old_cib else None, new=xmltostring(new.cib), debug=debug, changed=True)
+    else:
+        module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug, changed=True)
 
 
 # import module snippets
