@@ -451,7 +451,7 @@ def main():
 
     state = module.params['state']
     need_commit = module.params['commit']
-    args = splitter(module.params['resource'])
+    args = splitter(module.params['resource'].rstrip())
     changed = False
 
     if len(args) == 0:
