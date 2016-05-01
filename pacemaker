@@ -18,16 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
-import datetime
-import traceback
 import re
-import shlex
-import os
 import crmsh.parse
 from crmsh.xmlutil import xml_equals
 from lxml.etree import tostring as xmltostring
-#from xmltodict import parse as parsexmltodict
 
 DOCUMENTATION = '''
 ---
@@ -35,7 +29,8 @@ module: command
 version_added: historical
 short_description: Executes a command on a remote node
 description:
-     - The M(command) module takes the command name followed by a list of space-delimited arguments.
+     - The M(command) module takes the command name followed by a list of
+       space-delimited arguments.
      - The given command will be executed on all selected nodes. It will not be
        processed through the shell, so variables like C($HOME) and operations
        like C("<"), C(">"), C("|"), and C("&") will not work (use the M(shell)
@@ -74,6 +69,7 @@ cmd_xmlres_map = {
 }
 
 debug = []
+
 
 class BaseParser(object):
     id_name = None
@@ -141,7 +137,7 @@ class PrimitiveParser(BaseParser):
                 if (arg == "op"):
                     op_type = args.pop(0)
                 continue
-    
+
             if '=' not in arg:
                 raise Exception("no key=value option: %s" % arg)
 
@@ -234,10 +230,10 @@ class CloneParser(BaseParser):
             if (arg in ["params", "meta"]):
                 mode = arg
                 continue
-    
+
             if mode is None:
                 self.module.fail_json(rc=258, msg="no params or meta")
-    
+
             key, value = arg.split("=")
             if key == "":
                 self.module.fail_json(
@@ -250,7 +246,7 @@ class CloneParser(BaseParser):
             if mode not in ret:
                 ret[mode] = {}
             ret[mode][key] = value
-    
+
         return ret
 
 
@@ -298,7 +294,8 @@ class LocationParser(BaseParser):
                 else:
                     self.module.fail_json(
                         rc=258,
-                        msg="no score in rule for location (id=%s)" % ret["id"])
+                        msg="no score in rule for location (id=%s)"
+                        % ret["id"])
 
             elif newrule is not None:
                 newrule["expression"].append(arg)
@@ -353,7 +350,7 @@ class PropertyParser(BaseParser):
 
         if args[0].startswith("cib-bootstrap-options:"):
             args.pop(0)
-    
+
         while (args):
             arg = args.pop(0)
             if '=' not in arg:
@@ -361,7 +358,7 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no key-value :%s" % arg)
             key, value = arg.split("=")
-    
+
             if key == "":
                 self.module.fail_json(
                     rc=258,
@@ -371,7 +368,7 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
             ret[key] = value
-    
+
         return ret
 
 
@@ -405,7 +402,7 @@ class FencingTopologyParser(BaseParser):
                 newfence.append(arg)
         if newnode:
             ret[newnode] = newfence
-    
+
         return ret
 
 
@@ -441,8 +438,7 @@ class CIBParser(object):
 
     def parse_cib(self, args):
         if args[0] in self.cib_parser_class:
-            return self.cib_parser_class[args[0]]\
-                    (args[:], module=self.module)
+            return self.cib_parser_class[args[0]](args[:], module=self.module)
         return None
 
     def parse_cibs(self, lines):
@@ -479,7 +475,6 @@ def main():
     state = module.params['state']
     need_commit = module.params['commit']
     args = splitter(module.params['resource'].rstrip())
-    changed = False
 
     if len(args) == 0:
         module.fail_json(rc=256, msg="no command given")
@@ -487,7 +482,8 @@ def main():
     if args[0] == "commit":
         rc, out, err = module.run_command(["crm", "configure", "commit"])
         if rc:
-            module.fail_json(rc=256, msg="crm command failed", out=out, err=err)
+            module.fail_json(rc=256, msg="crm command failed", out=out,
+                             err=err)
         module.exit_json(args=args, changed=True)
 
     parser = CIBParser(module)
@@ -497,7 +493,8 @@ def main():
     rc, out, err = module.run_command(crm_args)
 
     if rc:
-        module.fail_json(rc=256, msg="crm configure show failed", out=out, err=err)
+        module.fail_json(rc=256, msg="crm configure show failed", out=out,
+                         err=err)
 
     is_same = None
     old_cib = None
@@ -543,15 +540,20 @@ def main():
             #debug.append("running crm -F -w %s" % command)
             rc, out, err = module.run_command(["crm", "-F", "-w"] + command)
             if rc:
-                module.fail_json(rc=256, msg="crm -F -w %s failed" % ' '.join(command), out=out, err=err)
+                module.fail_json(rc=256, msg="crm -F -w %s failed" %
+                                 ' '.join(command), out=out, err=err)
 
     if new.crmsh:
-        module.exit_json(args=args, old=xmltostring(old_cib) if old_cib is not None else None, new=xmltostring(new.cib), debug=debug, changed=True)
+        module.exit_json(
+            args=args,
+            old=xmltostring(old_cib) if old_cib is not None else None,
+            new=xmltostring(new.cib), debug=debug, changed=True)
     else:
-        module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug, changed=True)
+        module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug,
+                         changed=True)
 
 
 # import module snippets
-from ansible.module_utils.basic import *
+from ansible.module_utils.basic import *  # noqa
 
 main()
