@@ -117,54 +117,7 @@ class BaseParser(object):
 
 class PrimitiveParser(BaseParser):
     id_name = "rsc"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            rsc=args.pop(0),
-            type=args.pop(0),
-            )
-
-        if ':' not in ret['type']:
-            ret['type'] = 'ocf:heartbeat:' + ret['type']
-
-        mode = None
-        while (len(args) > 0):
-            arg = args.pop(0)
-            if (arg in ["params", "meta", "utilization",
-                        "operations", "op"]):
-                mode = arg
-                if (arg == "op"):
-                    op_type = args.pop(0)
-                continue
-
-            if '=' not in arg:
-                raise Exception("no key=value option: %s" % arg)
-
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258, msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-
-            key = key.strip('"').strip("'")
-            value = value.strip('"').strip("'")
-
-            if mode not in ret:
-                ret[mode] = {}
-            if (mode == "op"):
-                if op_type not in ret[mode]:
-                    ret[mode][op_type] = {}
-                ret[mode][op_type][key] = value
-            else:
-                if mode not in ret:
-                    ret[mode] = {}
-                ret[mode][key] = value
-
-        return ret
+    crmsh = True
 
 
 class MonitorParser(BaseParser):
@@ -181,73 +134,12 @@ class MonitorParser(BaseParser):
 
 class GroupParser(BaseParser):
     id_name = "name"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            name=args.pop(0),
-            rsc=[],
-            )
-        mode = None
-        while (args):
-            arg = args.pop(0)
-            if (arg in ["params", "meta"]):
-                mode = arg
-                continue
-
-            if mode is None:
-                ret["rsc"].append(arg)
-                continue
-
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-            if mode not in ret:
-                ret[mode] = {}
-            ret[mode][key] = value
-
-        return ret
+    crmsh = True
 
 
 class CloneParser(BaseParser):
     id_name = "name"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            name=args.pop(0),
-            rsc=args.pop(0),
-            )
-        mode = None
-        while (args):
-            arg = args.pop(0)
-            if (arg in ["params", "meta"]):
-                mode = arg
-                continue
-
-            if mode is None:
-                self.module.fail_json(rc=258, msg="no params or meta")
-
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-            if mode not in ret:
-                ret[mode] = {}
-            ret[mode][key] = value
-
-        return ret
+    crmsh = True
 
 
 class MsParser(CloneParser):
@@ -262,53 +154,6 @@ class LocationParser(BaseParser):
     id_name = "id"
     crmsh = True
     resource = False
-
-    def parse(self, args):
-        argscopy = list(args)
-        ret = dict(
-            command=args.pop(0),
-            id=args.pop(0),
-            rsc=args.pop(0),
-            )
-        ret["rules"] = []
-
-        newrule = None
-        while (args):
-            arg = args.pop(0)
-
-            if arg == "rule":
-                if newrule:
-                    ret["rules"].append(newrule)
-                newrule = dict(expression=[])
-                arg = args.pop(0)
-                while arg.startswith("$"):
-                    key, value = arg.split("=")
-                    if value == "":
-                        self.module.fail_json(
-                            rc=258,
-                            msg="no value in key=value option (key=%s)" % key)
-                    newrule[key] = value
-                    arg = args.pop(0)
-                if arg.endswith(":"):
-                    newrule["score"] = arg
-                else:
-                    self.module.fail_json(
-                        rc=258,
-                        msg="no score in rule for location (id=%s)"
-                        % ret["id"])
-
-            elif newrule is not None:
-                newrule["expression"].append(arg)
-
-            else:
-                self.module.fail_json(
-                    rc=258,
-                    msg="no rule for location (id=%s)" % ret["id"],
-                    args=argscopy)
-        if newrule:
-            ret["rules"].append(newrule)
-
-        return ret
 
 
 class ColocationParser(BaseParser):
