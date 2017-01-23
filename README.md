@@ -9,6 +9,7 @@ use this, write a playbook like below:
   hosts: controller
   become: yes
   serial: 1
+  ignore_target_role: false
   tasks:
     - name: disable stonith
       pacemaker: >
@@ -72,6 +73,10 @@ Transactional example:
 "resource" contains the crm resource to configure. 
 'primitive ... nic="port-ctl"' is just like "crm configure primitive"
 subcommand. As such after every call of the pacemaker module there is an implicit commit.
+
+if `ignore_target_role` is given and true the meta.target-role value will
+be ignored when comparing current and new cib, allowing for resource restart
+outside this module.
 
 state=<present|absent> works just like other ansible modules (default=present).
 If there is the same configuration, a task with state=present will do nothing
