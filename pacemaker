@@ -314,6 +314,7 @@ def main():
             'state': dict(default='present', choices=['present', 'absent']),
             'action': dict(default='resource', choices=['prepare', 'resource', 'commit']),
             'shadow': dict(default=None),
+            'ignore_target_role': dict(default=True, type='bool', choices=BOOLEANS),
         },
         supports_check_mode=True
     )
@@ -322,6 +323,7 @@ def main():
     action = module.params['action']
     shadow = module.params['shadow']
     resource = module.params['resource']
+    ignore_target_role = module.params['ignore_target_role']
     
     # Action 'prepare': Create a new shadow copy of the running config
     if action == "prepare":
@@ -380,6 +382,11 @@ def main():
         if new.id != cur.id:
             continue
         old_cib = cur.cib
+        if ignore_target_role:
+            if 'meta' in old_cib.keys():
+                old_cib['meta'].pop('target-role',None)
+                if len(old_cib['meta'])==0:
+                    old_cib.pop('meta',None)
         is_same = new.is_same(cur)
         break
 
