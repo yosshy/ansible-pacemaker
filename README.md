@@ -7,7 +7,7 @@ use this, write a playbook like below:
 ```
 - name: test
   hosts: controller
-  sudo: yes
+  become: yes
   serial: 1
   tasks:
     - name: disable stonith
