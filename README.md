@@ -36,6 +36,39 @@ use this, write a playbook like below:
            params ip="192.168.33.100" cidr_netmask="24" nic="port-ctl"
          state: absent
 ```
+
+To modify more than one resource in a transaction and commit all changes at once, use the "shadow"
+property in combination with the actions 'prepare', 'resource' and 'commit'. This will create a shadow
+copy of the running config, modify it and commit it. This new feature replaces the non-functional
+commit handling of all prevoius releases.
+
+Transactional example:
+
+```
+- name: test
+  hosts: controller
+  become: yes
+  serial: 1
+  tasks:
+    - name: Start pacemaker config transation
+      pacemaker:
+        action: prepare
+        shadow: my-temp-config
+    - name: Modify resource
+      pacemaker:
+        resource: [...]
+        shadow: my-temp-config
+    - name: Modify resource
+      pacemaker:
+        resource: [...]
+        shadow: my-temp-config
+    [...]
+    - name: Commit pacemaker config transation
+      pacemaker:
+        action: commit
+        shadow: my-temp-config
+```
+
 "resource" contains the crm resource to configure. 
 'primitive ... nic="port-ctl"' is just like "crm configure primitive"
 subcommand. As such after every call of the pacemaker module there is an implicit commit.
@@ -54,7 +87,7 @@ Currently, it supports crm configure sub commands below:
 
 - primitive (tested)
 - monitor
-- group
+- group (tested)
 - clone
 - ms
 - rsc_template
