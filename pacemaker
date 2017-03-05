@@ -158,6 +158,7 @@ class LocationParser(BaseParser):
 
 class ColocationParser(BaseParser):
     id_name = "id"
+    resource = False
 
     def parse(self, args):
         ret = dict(
@@ -171,6 +172,7 @@ class ColocationParser(BaseParser):
 
 class OrderParser(BaseParser):
     id_name = "id"
+    resource = False
 
     def parse(self, args):
         ret = dict(
