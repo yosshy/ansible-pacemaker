@@ -222,6 +222,10 @@ class PropertyParser(BaseParser):
 class RscDefaultsParser(PropertyParser):
     partial_compare = True
     no_delete = True
+    def parse(self, args):
+        return {
+            "command": args.pop(0)
+        }
 
 
 class FencingTopologyParser(BaseParser):
