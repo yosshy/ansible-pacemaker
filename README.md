@@ -102,3 +102,8 @@ Currently, it supports crm configure sub commands below:
 - property (tested)
 - rsc_defaults
 - fencing_topology
+
+compatibility
+-------------
+
+This version has been tested with crmsh 2.2.x and 2.3.x.
