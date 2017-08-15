@@ -18,12 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
-import datetime
-import traceback
 import re
-import shlex
-import os
+import crmsh.parse
+from crmsh.xmlutil import xml_equals
+from lxml.etree import tostring as xmltostring
 
 DOCUMENTATION = '''
 ---
@@ -31,7 +29,8 @@ module: command
 version_added: historical
 short_description: Executes a command on a remote node
 description:
-     - The M(command) module takes the command name followed by a list of space-delimited arguments.
+     - The M(command) module takes the command name followed by a list of
+       space-delimited arguments.
      - The given command will be executed on all selected nodes. It will not be
        processed through the shell, so variables like C($HOME) and operations
        like C("<"), C(">"), C("|"), and C("&") will not work (use the M(shell)
@@ -65,25 +64,49 @@ REX = re.compile(
     re.DOTALL | re.VERBOSE)
 
 
+cmd_xmlres_map = {
+    "location": "rsc_location",
+}
+
+debug = []
+
+
 class BaseParser(object):
     id_name = None
     id = None
     partial_compare = False
     module = None
     no_delete = False
+    crmsh = False
+    resource = True
 
     def __init__(self, args, module=None):
         if module:
             self.module = module
-        self.cib = self.parse(args)
-        self.command = self.cib["command"]
-        if self.id_name:
-            self.id = self.cib[self.id_name]
+        if self.crmsh:
+            debug.append("crmsh prim: %s" % args[0])
+            # See https://github.com/ClusterLabs/crmsh/commit/5b11db312101b2b798017fef9e7539fd5fb8585a
+            if hasattr(crmsh.parse,'CliParser'):
+                clip = crmsh.parse.CliParser()
+            else:
+                clip = crmsh.parse
+            self.cib = clip.parse(' '.join(args))
+            self.command = args[0]
+            self.id = self.cib.get('id')
+            debug.append("id: %s" % self.id)
+        else:
+            self.cib = self.parse(args)
+            self.command = self.cib["command"]
+            if self.id_name:
+                self.id = self.cib[self.id_name]
 
     def parse(self, args):
         raise NotImplementedError()
 
     def is_same(self, obj):
+        if self.crmsh:
+            return xml_equals(self.cib, obj.cib)
+
         obj_key = obj.cib.keys()
         for key, value in self.cib.iteritems():
             if key not in obj_key:
@@ -98,47 +121,7 @@ class BaseParser(object):
 
 class PrimitiveParser(BaseParser):
     id_name = "rsc"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            rsc=args.pop(0),
-            type=args.pop(0),
-            )
-        mode = None
-        while (len(args) > 0):
-            arg = args.pop(0)
-            if (arg in ["params", "meta", "utilization",
-                        "operations", "op"]):
-                mode = arg
-                if (arg == "op"):
-                    op_type = args.pop(0)
-                continue
-    
-            if '=' not in arg:
-                raise Exception("no key=value option: %s" % arg)
-
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258, msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-
-            if mode not in ret:
-                ret[mode] = {}
-            if (mode == "op"):
-                if op_type not in ret[mode]:
-                    ret[mode][op_type] = {}
-                ret[mode][op_type][key] = value
-            else:
-                if mode not in ret:
-                    ret[mode] = {}
-                ret[mode][key] = value
-
-        return ret
+    crmsh = True
 
 
 class MonitorParser(BaseParser):
@@ -155,73 +138,12 @@ class MonitorParser(BaseParser):
 
 class GroupParser(BaseParser):
     id_name = "name"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            name=args.pop(0),
-            rsc=[],
-            )
-        mode = None
-        while (args):
-            arg = args.pop(0)
-            if (arg in ["params", "meta"]):
-                mode = arg
-                continue
-
-            if mode is None:
-                rsc.append(arg)
-                continue
-
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-            if mode not in ret:
-                ret[mode] = {}
-            ret[mode][key] = value
-
-        return ret
+    crmsh = True
 
 
 class CloneParser(BaseParser):
     id_name = "name"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            name=args.pop(0),
-            rsc=args.pop(0),
-            )
-        mode = None
-        while (args):
-            arg = args.pop(0)
-            if (arg in ["params", "meta"]):
-                mode = arg
-                continue
-    
-            if mode is None:
-                self.module.fail_json(rc=258, msg="no params or meta")
-    
-            key, value = arg.split("=")
-            if key == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no key in key=value option")
-            if value == "":
-                self.module.fail_json(
-                    rc=258,
-                    msg="no value in key=value option (key=%s)" % key)
-            if mode not in ret:
-                ret[mode] = {}
-            ret[mode][key] = value
-    
-        return ret
+    crmsh = True
 
 
 class MsParser(CloneParser):
@@ -234,60 +156,13 @@ class RscTemplateParser(PrimitiveParser):
 
 class LocationParser(BaseParser):
     id_name = "id"
-
-    def parse(self, args):
-        ret = dict(
-            command=args.pop(0),
-            id=args.pop(0),
-            rsc=args.pop(0),
-            )
-        arg = args.pop(0)
-        if arg != "rules":
-            ret["score"] = args.pop(0)
-            ret["node"] = args.pop(0)
-            return ret
-        else:
-            ret["rules"] = []
-
-        newrule = None
-        while (args):
-            arg = args.pop(0)
-
-            if arg == "rule":
-                if newrule:
-                    ret["rules"].append(newrule)
-                newrule = dict(expression=[])
-                arg = args.pop(0)
-                while arg.startswith("$"):
-                    key, value = arg.split("=")
-                    if value == "":
-                        self.module.fail_json(
-                            rc=258,
-                            msg="no value in key=value option (key=%s)" % key)
-                    newargs[key] = value
-                    arg = args.pop(0)
-                if arg.endswith(":"):
-                    newargs["score"] = arg
-                else:
-                    self.module.fail_json(
-                        rc=258,
-                        msg="no score in rule for location (id=%s)" % ret["id"])
-
-            elif newrule is not None:
-                newrule["expression"].append(args)
-
-            else:
-                self.module.fail_json(
-                    rc=258,
-                    msg="no rule for location (id=%s)" % ret["id"])
-        if newrule:
-            ret["rules"].append(newrule)
-
-        return ret
+    crmsh = True
+    resource = False
 
 
 class ColocationParser(BaseParser):
     id_name = "id"
+    resource = False
 
     def parse(self, args):
         ret = dict(
@@ -301,6 +176,7 @@ class ColocationParser(BaseParser):
 
 class OrderParser(BaseParser):
     id_name = "id"
+    resource = False
 
     def parse(self, args):
         ret = dict(
@@ -325,7 +201,7 @@ class PropertyParser(BaseParser):
 
         if args[0].startswith("cib-bootstrap-options:"):
             args.pop(0)
-    
+
         while (args):
             arg = args.pop(0)
             if '=' not in arg:
@@ -333,7 +209,7 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no key-value :%s" % arg)
             key, value = arg.split("=")
-    
+
             if key == "":
                 self.module.fail_json(
                     rc=258,
@@ -343,13 +219,17 @@ class PropertyParser(BaseParser):
                     rc=258,
                     msg="no value in key=value option (key=%s)" % key)
             ret[key] = value
-    
+
         return ret
 
 
 class RscDefaultsParser(PropertyParser):
     partial_compare = True
     no_delete = True
+    def parse(self, args):
+        return {
+            "command": args.pop(0)
+        }
 
 
 class FencingTopologyParser(BaseParser):
@@ -377,7 +257,7 @@ class FencingTopologyParser(BaseParser):
                 newfence.append(arg)
         if newnode:
             ret[newnode] = newfence
-    
+
         return ret
 
 
@@ -413,12 +293,12 @@ class CIBParser(object):
 
     def parse_cib(self, args):
         if args[0] in self.cib_parser_class:
-            return self.cib_parser_class[args[0]]\
-                    (args[:], module=self.module)
+            return self.cib_parser_class[args[0]](args[:], module=self.module)
         return None
 
     def parse_cibs(self, lines):
         cibs = []
+        #debug.append("all lines: %s" % lines)
         new_line = ""
         for line in lines:
             new_line += line.strip()
@@ -428,6 +308,7 @@ class CIBParser(object):
                 if len(new_line) == 0:
                     continue
                 args = splitter(new_line)
+                #debug.append("new cib to parse: %s" % args[0])
                 cib = self.parse_cib(args)
                 if cib:
                     cibs.append(cib)
@@ -437,38 +318,85 @@ class CIBParser(object):
 
 def main():
 
-    # the command module is the one ansible module that does not take key=value args
-    # hence don't copy this one if you are looking to build others!
-    module = PacemakerModule(argument_spec=dict())
+    module = AnsibleModule(
+        argument_spec={
+            'resource': dict(default=None),
+            'state': dict(default='present', choices=['present', 'absent']),
+            'action': dict(default='resource', choices=['prepare', 'resource', 'commit']),
+            'shadow': dict(default=None),
+            'ignore_target_role': dict(default=True, type='bool', choices=BOOLEANS),
+        },
+        supports_check_mode=True
+    )
 
     state = module.params['state']
-    need_commit = module.params['commit']
-    args = splitter(module.params['args'])
-    changed = False
-
-    if len(args) == 0:
-        module.fail_json(rc=256, msg="no command given")
-
-    if args[0] == "commit":
-        rc, out, err = module.run_command(["crm", "configure", "commit"])
+    action = module.params['action']
+    shadow = module.params['shadow']
+    resource = module.params['resource']
+    ignore_target_role = module.params['ignore_target_role']
+    
+    # Action 'prepare': Create a new shadow copy of the running config
+    if action == "prepare":
+        if shadow == None:
+            module.fail_json(rc=256, msg="parameter 'shadow' is required for action 'prepare'")
+        rc, out, err = module.run_command(["crm", "cib", "new", shadow, "--force"])
         if rc:
-            module.fail_json(rc=256, msg="crm command failed")
-        module.exit_json(args=args, changed=True)
+            module.fail_json(rc=256, msg="crm command failed", out=out,
+                             err=err)
+        module.exit_json(changed=False)
+
+    # Action 'commit': Apply shadow copy as new config
+    if action == "commit":
+        if shadow == None:
+            module.fail_json(rc=256, msg="parameter 'shadow' is required for action 'commit'")
+        rc, out, err = module.run_command(["crm", "cib", "commit", shadow])
+        if rc:
+            module.fail_json(rc=256, msg="crm command 'crm cib commit %s' failed" % shadow, out=out,
+                             err=err)
+        rc, out, err = module.run_command(["crm", "cib", "delete", shadow])
+        if rc:
+            module.exit_json(changed=False, warnings=["Could not delete shadow config '%s'" % shadow])
+        module.exit_json(changed=False)
+
+    if action != "resource":
+        module.fail_json(rc=256, msg="unexpected action: '%s'" % action)
+
+    if resource == None:
+        module.fail_json(rc=256, msg="parameter 'resource' is required for action 'prepare'")
+
+    args = splitter(module.params['resource'].rstrip())
 
     parser = CIBParser(module)
     new = parser.parse_cib(args)
+    
+    crm_base = [ "crm" ]
+    
+    # if shadow is set, we do all operations on the given shadow copy of the config
+    if shadow != None:
+        crm_base = crm_base + [ "-c", shadow ]
 
-    crm_args = ["crm", "configure", "show"]
+    crm_args = crm_base + [ "configure", "show"]
     rc, out, err = module.run_command(crm_args)
+
     if rc:
-        module.fail_json(rc=256, msg="crm command failed")
+        module.fail_json(rc=256, msg="crm configure show failed", out=out,
+                         err=err)
 
     is_same = None
+    old_cib = None
     for cur in parser.parse_cibs(out.splitlines()):
+        #debug.append("old command: %s, id: %s" % (cur.command, cur.id))
+
         if new.command != cur.command:
             continue
         if new.id != cur.id:
             continue
+        old_cib = cur.cib
+        if ignore_target_role:
+            if 'meta' in old_cib.keys():
+                old_cib['meta'].pop('target-role',None)
+                if len(old_cib['meta'])==0:
+                    old_cib.pop('meta',None)
         is_same = new.is_same(cur)
         break
 
@@ -483,67 +411,38 @@ def main():
             need_delete = True
     else:
         if is_same:
-            module.exit_json(args=args, changed=False)
+            module.exit_json(args=args, debug=debug, changed=False)
         elif is_same is False and not new.no_delete:
             need_delete = True
         need_append = True
 
     crm_config_commands = []
     if need_delete:
-        crm_config_commands.append(["resource", "stop", new.id])
+        debug.append("deleting %s" % new.id)
+        if new.resource:
+            crm_config_commands.append(["resource", "stop", new.id])
         crm_config_commands.append(["configure", "delete", new.id])
     if need_append:
         crm_config_commands.append(["configure"] + args)
-    if need_commit:
-        crm_config_commands.append(["configure", "commit"])
-    for command in crm_config_commands:
-        rc, out, err = module.run_command(["crm", "-F"] + command)
-        if rc:
-            module.fail_json(rc=256, msg="crm command failed")
-            #FIXME: Re-enable error messages.
-            #module.fail_json(rc=256, msg="crm command failed \n%s"%err)
+    if not module.check_mode:
+        for command in crm_config_commands:
+            #debug.append("running crm -F -w %s" % command)
+            rc, out, err = module.run_command(crm_base + ["-F", "-w"] + command)
+            if rc:
+                module.fail_json(rc=256, msg="crm -F -w %s failed" %
+                                 ' '.join(command), out=out, err=err)
 
-    module.exit_json(args=args, changed=True)
+    if new.crmsh:
+        module.exit_json(
+            args=args,
+            old=xmltostring(old_cib) if old_cib is not None else None,
+            new=xmltostring(new.cib), debug=debug, changed=True)
+    else:
+        module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug,
+                         changed=True)
 
 
 # import module snippets
-from ansible.module_utils.basic import *
-
-# only the command module should ever need to do this
-# everything else should be simple key=value
-
-class PacemakerModule(AnsibleModule):
-
-    def _handle_aliases(self):
-        return {}
-
-    def _check_invalid_arguments(self):
-        pass
-
-    def _load_params(self):
-        ''' read the input and return a dictionary and the arguments string '''
-        args = MODULE_ARGS
-        params = {}
-
-        params["state"] = "present"
-        params["commit"] = True
-        r = re.compile(r'(^|\s)(state)=(?P<quote>[\'"])?(.*?)(?(quote)(?<!\\)(?P=quote))((?<!\\)(?=\s)|$)')
-        for m in r.finditer(args):
-            v = m.group(4).replace("\\", "")
-            if m.group(2) == "state":
-                if v not in ["present", "absent"]:
-                    self.fail_json(
-                            rc=256, msg="state= is either present or absent")
-                params['state'] = v
-            if m.group(2) == "commit":
-                if v not in ["yes", "no"]:
-                    self.fail_json(
-                            rc=256, msg="commit= is either yes or no")
-                if v == 'yes':
-                    params['commit'] = True
-        args = r.sub("", args)
-
-        params["args"] = args.strip()
-        return (params, params["args"])
+from ansible.module_utils.basic import *  # noqa
 
 main()
