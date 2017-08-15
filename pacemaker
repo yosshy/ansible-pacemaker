@@ -85,7 +85,11 @@ class BaseParser(object):
             self.module = module
         if self.crmsh:
             debug.append("crmsh prim: %s" % args[0])
-            clip = crmsh.parse.CliParser()
+            # See https://github.com/ClusterLabs/crmsh/commit/5b11db312101b2b798017fef9e7539fd5fb8585a
+            if hasattr(crmsh.parse,'CliParser'):
+                clip = crmsh.parse.CliParser()
+            else:
+                clip = crmsh.parse
             self.cib = clip.parse(' '.join(args))
             self.command = args[0]
             self.id = self.cib.get('id')
