@@ -103,21 +103,20 @@ class BaseParser(object):
     def parse(self, args):
         raise NotImplementedError()
 
-    def is_same(self, obj):
+    def is_same(self, cib):
         if self.crmsh:
-            return xml_equals(self.cib, obj.cib)
+            return xml_equals(self.cib, cib)
 
-        obj_key = obj.cib.keys()
+        obj_key = cib.keys()
         for key, value in self.cib.iteritems():
             if key not in obj_key:
                 return False
-            if value != obj.cib.get(key):
+            if value != cib.get(key):
                 return False
             obj_key.remove(key)
         if len(obj_key) and not self.partial_compare:
             return False
         return True
-
 
 class PrimitiveParser(BaseParser):
     id_name = "rsc"
@@ -393,11 +392,12 @@ def main():
             continue
         old_cib = cur.cib
         if ignore_target_role:
-            if 'meta' in old_cib.keys():
-                old_cib['meta'].pop('target-role',None)
-                if len(old_cib['meta'])==0:
-                    old_cib.pop('meta',None)
-        is_same = new.is_same(cur)
+            for target in old_cib.xpath("//meta_attributes/nvpair[@name='target-role']"):
+                target.getparent().remove(target)
+            for meta in old_cib.xpath("//meta_attributes"):
+                if len(meta.getchildren()) == 0:
+                    meta.getparent().remove(meta)
+        is_same = new.is_same(old_cib)
         break
 
     need_delete = False
