@@ -394,13 +394,13 @@ def main():
             continue
 
         old_cib = cur.cib
-        if ignore_target_role:
-            for target in old_cib.xpath("//meta_attributes/nvpair[@name='target-role']"):
-                target.getparent().remove(target)
-        if ignore_is_managed:
-            for managed in old_cib.xpath("//meta_attributes/nvpair[@name='is-managed']"):
-                managed.getparent().remove(managed)
-        if ignore_target_role or ignore_is_managed:
+        if cur.crmsh and (ignore_target_role or ignore_is_managed):
+            if ignore_target_role:
+                for target in old_cib.xpath("//meta_attributes/nvpair[@name='target-role']"):
+                    target.getparent().remove(target)
+            if ignore_is_managed:
+                for managed in old_cib.xpath("//meta_attributes/nvpair[@name='is-managed']"):
+                    managed.getparent().remove(managed)
             for meta in old_cib.xpath("//meta_attributes"):
                 if len(meta.getchildren()) == 0:
                     meta.getparent().remove(meta)
