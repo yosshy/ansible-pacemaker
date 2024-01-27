@@ -21,7 +21,9 @@
 import re
 import crmsh.parse
 from crmsh.xmlutil import xml_equals
+from crmsh.cibconfig import cib_factory
 from lxml.etree import tostring as xmltostring
+from lxml import etree
 
 DOCUMENTATION = '''
 ---
@@ -84,40 +86,44 @@ class BaseParser(object):
         if module:
             self.module = module
         if self.crmsh:
-            debug.append("crmsh prim: %s" % args[0])
+            #debug.append("crmsh prim: %s" % args[0])
             # See https://github.com/ClusterLabs/crmsh/commit/5b11db312101b2b798017fef9e7539fd5fb8585a
             if hasattr(crmsh.parse,'CliParser'):
                 clip = crmsh.parse.CliParser()
             else:
                 clip = crmsh.parse
+
+            # initialize cib
+            cib_factory.get_cib()
             self.cib = clip.parse(' '.join(args))
             self.command = args[0]
+            self.args = args
             self.id = self.cib.get('id')
-            debug.append("id: %s" % self.id)
+            #debug.append("id: %s" % self.id)
         else:
             self.cib = self.parse(args)
             self.command = self.cib["command"]
+            self.args = args
             if self.id_name:
                 self.id = self.cib[self.id_name]
 
     def parse(self, args):
         raise NotImplementedError()
 
-    def is_same(self, obj):
+    def is_same(self, cib):
         if self.crmsh:
-            return xml_equals(self.cib, obj.cib)
+            return xml_equals(self.cib, cib)
 
-        obj_key = obj.cib.keys()
-        for key, value in self.cib.iteritems():
+        obj_key = list(cib)
+        for key, value in self.cib.items():
             if key not in obj_key:
                 return False
-            if value != obj.cib.get(key):
+            if value != cib.get(key):
                 return False
             obj_key.remove(key)
         if len(obj_key) and not self.partial_compare:
             return False
         return True
-
 
 class PrimitiveParser(BaseParser):
     id_name = "rsc"
@@ -298,7 +304,7 @@ class CIBParser(object):
 
     def parse_cibs(self, lines):
         cibs = []
-        #debug.append("all lines: %s" % lines)
+        #debug.append("all lines: \n%s" % "\n".join(lines))
         new_line = ""
         for line in lines:
             new_line += line.strip()
@@ -324,7 +330,8 @@ def main():
             'state': dict(default='present', choices=['present', 'absent']),
             'action': dict(default='resource', choices=['prepare', 'resource', 'commit']),
             'shadow': dict(default=None),
-            'ignore_target_role': dict(default=True, type='bool', choices=BOOLEANS),
+            'ignore_target_role': dict(default=True, type='bool'),
+            'ignore_is_managed': dict(default=True, type='bool'),
         },
         supports_check_mode=True
     )
@@ -334,6 +341,7 @@ def main():
     shadow = module.params['shadow']
     resource = module.params['resource']
     ignore_target_role = module.params['ignore_target_role']
+    ignore_is_managed = module.params['ignore_is_managed']
     
     # Action 'prepare': Create a new shadow copy of the running config
     if action == "prepare":
@@ -368,9 +376,9 @@ def main():
 
     parser = CIBParser(module)
     new = parser.parse_cib(args)
-    
+
     crm_base = [ "crm" ]
-    
+
     # if shadow is set, we do all operations on the given shadow copy of the config
     if shadow != None:
         crm_base = crm_base + [ "-c", shadow ]
@@ -392,26 +400,31 @@ def main():
         if new.id != cur.id:
             continue
         old_cib = cur.cib
-        if ignore_target_role:
-            if 'meta' in old_cib.keys():
-                old_cib['meta'].pop('target-role',None)
-                if len(old_cib['meta'])==0:
-                    old_cib.pop('meta',None)
-        is_same = new.is_same(cur)
+        if cur.crmsh and (ignore_target_role or ignore_is_managed):
+            if ignore_target_role:
+                for target in old_cib.xpath("//meta_attributes/nvpair[@name='target-role']"):
+                    target.getparent().remove(target)
+            if ignore_is_managed:
+                for managed in old_cib.xpath("//meta_attributes/nvpair[@name='is-managed']"):
+                    managed.getparent().remove(managed)
+            for meta in old_cib.xpath("//meta_attributes"):
+                if len(meta.getchildren()) == 0:
+                    meta.getparent().remove(meta)
+        is_same = new.is_same(old_cib)
         break
 
     need_delete = False
     need_append = False
     if state == 'absent':
         if is_same is None:
-            module.exit_json(args=args, changed=False)
+            module.exit_json(args=" ".join(args), changed=False)
         elif is_same:
             if new.id is None:
                 module.fail_json(rc=256, msg="can't delete %s" % new.command)
             need_delete = True
     else:
         if is_same:
-            module.exit_json(args=args, debug=debug, changed=False)
+            module.exit_json(args=" ".join(args), debug=debug, changed=False)
         elif is_same is False and not new.no_delete:
             need_delete = True
         need_append = True
@@ -434,11 +447,11 @@ def main():
 
     if new.crmsh:
         module.exit_json(
-            args=args,
-            old=xmltostring(old_cib) if old_cib is not None else None,
-            new=xmltostring(new.cib), debug=debug, changed=True)
+            args=" ".join(args), cur=" ".join(cur.args),
+            old=xmltostring(old_cib, pretty_print=True) if old_cib is not None else None,
+            new=xmltostring(new.cib, pretty_print=True), debug=debug, changed=True)
     else:
-        module.exit_json(args=args, old=old_cib, new=new.cib, debug=debug,
+        module.exit_json(args=" ".join(args), old=old_cib, new=new.cib, debug=debug,
                          changed=True)
 
 
